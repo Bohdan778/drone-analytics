@@ -1,24 +1,26 @@
 import sys
 import os
-# Примусово додаємо кореневу папку drone-analytics до шляхів пошуку Python
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import numpy as np
 
 from parser.parser import parse_ardupilot_log
-# Імпортуємо нашу функцію з сусіднього файлу
-from haversine import calculate_haversine_distance
+
+from analytics.haversine import calculate_haversine_distance
 
 def calculate_flight_metrics(df: pd.DataFrame) -> dict:
     """
     Обчислює всі необхідні польотні метрики з DataFrame.
+    ВАЖЛИВО: функція також додає колонки v_x, v_y, v_z безпосередньо у df
+    для подальшого використання у 3D-візуалізації.
     """
-    # 1. Очищення даних
-    df = df.dropna(subset=['lat', 'lon', 'acc_x', 'acc_y', 'acc_z']).copy()
-    df = df.reset_index(drop=True)
+    # 1. Очищення даних 
+    df.dropna(subset=['lat', 'lon', 'acc_x', 'acc_y', 'acc_z'], inplace=True)
+    df.reset_index(drop=True, inplace=True)
 
-    # Переведення часу з мікросекунд у секунди та крок часу (dt)
+
     df['time_sec'] = (df['time'] - df['time'].iloc[0]) / 1e6
     dt = df['time_sec'].diff().fillna(0)
 
@@ -29,26 +31,26 @@ def calculate_flight_metrics(df: pd.DataFrame) -> dict:
     acc_magnitude = np.sqrt(df['acc_x']**2 + df['acc_y']**2 + df['acc_z']**2)
     max_acceleration = acc_magnitude.max()
 
-    # 3. Виклик функції Haversine з сусіднього модуля
+    # 3. Виклик функції Haversine
     df['distance_step'] = calculate_haversine_distance(df['lat'], df['lon'])
     total_distance = df['distance_step'].sum()
 
     # 4. Трапецієвидне інтегрування
-    # Базова компенсація гравітації по осі Z (медіана початку польоту)
+
     gravity_offset = df['acc_z'].iloc[:50].median()
 
-    # Інтегрування для осей X та Y
+
     for axis in ['x', 'y']:
         a_curr = df[f'acc_{axis}']
         a_prev = a_curr.shift(1).fillna(0)
         df[f'v_{axis}'] = (0.5 * (a_curr + a_prev) * dt).cumsum()
 
-    # Інтегрування для осі Z з відніманням гравітації
+
     a_z_curr = df['acc_z'] - gravity_offset
     a_z_prev = a_z_curr.shift(1).fillna(0)
     df['v_z'] = (0.5 * (a_z_curr + a_z_prev) * dt).cumsum()
 
-    # Розрахунок швидкостей
+
     horizontal_speed = np.sqrt(df['v_x']**2 + df['v_y']**2)
     vertical_speed = df['v_z'].abs()
 
@@ -61,15 +63,35 @@ def calculate_flight_metrics(df: pd.DataFrame) -> dict:
         "max_vertical_speed_m_s": vertical_speed.max()
     }
 
-# --- БЛОК ТЕСТУВАННЯ ---
-if __name__ == "__main__":
-    print("Читаємо лог-файл...")
-    # Шлях вказуємо відносно кореня проєкту: папка data -> файл 00000001.BIN
-    df = parse_ardupilot_log("data/00000019.BIN")
+def prepare_trajectory_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Конвертує координати WGS-84 у локальну систему ENU (метри від точки старту)
+    та готує масиви для 3D візуалізації.
+    """
+    R = 6371000.0  
 
-    print("Рахуємо метрики...")
-    result = calculate_flight_metrics(df)
+    # Точка старту
+    lat0 = np.radians(df['lat'].iloc[0])
+    lon0 = np.radians(df['lon'].iloc[0])
+    alt0 = df['alt'].iloc[0]
 
-    print("\n--- Результати польоту ---")
-    for key, value in result.items():
-        print(f"{key}: {round(value, 2)}")
+    # Поточні координати в радіанах
+    lat = np.radians(df['lat'])
+    lon = np.radians(df['lon'])
+
+    # Розрахунок локальних координат ENU (East, North, Up)
+    df['x_enu'] = R * (lon - lon0) * np.cos(lat0)
+    df['y_enu'] = R * (lat - lat0)
+    df['z_enu'] = df['alt'] - alt0
+
+    # Розраховуємо загальну 3D швидкість для кожного моменту часу
+    # (Щоб потім розфарбувати лінію графіка в залежності від швидкості)
+    if 'v_x' in df.columns and 'v_y' in df.columns and 'v_z' in df.columns:
+        df['speed_3d'] = np.sqrt(df['v_x']**2 + df['v_y']**2 + df['v_z']**2)
+    else:
+        df['speed_3d'] = 0 # Якщо швидкості ще не розраховані
+
+    # Повертаємо лише ті колонки, які потрібні для малювання графіка
+    columns_for_plot = ['time_sec', 'x_enu', 'y_enu', 'z_enu', 'speed_3d']
+    return df[columns_for_plot]
+
