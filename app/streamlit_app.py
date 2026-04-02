@@ -1,64 +1,62 @@
 import sys
 import os
 import streamlit as st
-import pandas as pd
-import numpy as np
 
-# 1. Додаємо кореневу папку проекту (DRONE-ANALYTICS) до шляхів пошуку Python.
-# Це вирішить проблему з підсвіткою помилок і дозволить знаходити інші модулі.
+# 1. Фікс шляхів (щоб імпорти працювали без помилок)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, '..'))
-sys.path.append(root_dir)
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
 
-# 2. Правильні абсолютні імпорти (з вказанням папок)
-from analytics.metrics import prepare_trajectory_data
+# 2. Налаштування сторінки МАЄ БУТИ ПЕРШИМ!
+st.set_page_config(page_title="Drone Analyzer", layout="wide")
+
+# Імпорти ваших модулів
+from parser.parser import parse_log
+from analytics.metrics import calculate_metrics, prepare_trajectory_data
 from visualization.plot_3d import plot_trajectory
 
-st.title("🚁 Аналіз просторової траєкторії дрона")
+# ---------------- UI ----------------
+st.title("🚁 Drone Flight Analyzer")
+st.write("Завантаж лог файл польоту дрона (.bin або .log)")
 
-# 1. Завантажуємо сирі дані (заміни 'telemetry.csv' на назву вашого файлу з даними)
-# Додав кешування, щоб Streamlit не перечитував файл при кожному кліку
+uploaded_file = st.file_uploader("Обери файл", type=["bin", "log"])
 
-@st.cache_data
-def load_data():
-    # Генеруємо фейковий політ (спіраль), щоб протестувати 3D візуалізацію
-    t = np.linspace(0, 100, 500) # 500 точок (секунд)
-    
-    # Симулюємо координати
-    lat = 50.45 + 0.001 * t * np.cos(t / 5)
-    lon = 30.52 + 0.001 * t * np.sin(t / 5)
-    alt = 10 + 0.5 * t # дрон плавно набирає висоту
-    
-    # Симулюємо швидкості
-    v_x = np.cos(t / 5) * 5
-    v_y = np.sin(t / 5) * 5
-    v_z = np.ones_like(t) * 0.5
-    
-    # Збираємо це все у табличку, яку очікує код твого друга
-    df = pd.DataFrame({
-        'time_sec': t,
-        'lat': lat,
-        'lon': lon,
-        'alt': alt,
-        'v_x': v_x,
-        'v_y': v_y,
-        'v_z': v_z
-    })
-    return df
+# ---------------- LOGIC ----------------
+if uploaded_file:
+    try:
+        # 1. Парсинг (робота напарника)
+        data = parse_log(uploaded_file)
 
-df = load_data()
+        # 2. Метрики (робота напарника)
+        metrics = calculate_metrics(data)
 
-try:
-    # 2. Робота твого друга: підготовка даних
-    st.write("🔄 Обробка даних (WGS-84 -> ENU)...")
-    prepared_df = prepare_trajectory_data(df)
-    
-    # 3. Твоя робота: створення 3D графіка
-    st.write("📊 Побудова 3D візуалізації...")
-    fig = plot_trajectory(prepared_df)
-    
-    # 4. Виводимо графік на екран
-    st.plotly_chart(fig, use_container_width=True)
+        st.success("Файл успішно оброблено ✅")
 
-except Exception as e:
-    st.error(f"❌ Виникла помилка: {e}")
+        # ---------------- METRICS ----------------
+        st.subheader("📊 Основні показники")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("Макс швидкість", f"{metrics.get('max_speed', 0):.2f} m/s")
+        with col2:
+            st.metric("Дистанція", f"{metrics.get('distance', 0):.2f} m")
+        with col3:
+            st.metric("Макс висота", f"{metrics.get('max_altitude', 0):.2f} m")
+
+        # ---------------- 3D PLOT ----------------
+        st.subheader("🛰️ 3D Траєкторія польоту")
+
+        # ТВОЯ РОБОТА: Конвертуємо координати (WGS-84 -> ENU), потім малюємо!
+        prepared_df = prepare_trajectory_data(data)
+        fig = plot_trajectory(prepared_df)
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------- RAW DATA (optional) ----------------
+        with st.expander("Показати сирі дані"):
+            # st.dataframe виглядає набагато краще для таблиць, ніж st.write
+            st.dataframe(data) 
+
+    except Exception as e:
+        st.error(f"Помилка обробки файлу: {e}")
