@@ -21,8 +21,7 @@ if root_dir not in sys.path:
 st.set_page_config(page_title="Drone Analyzer", layout="wide")
 
 
-# ---------------- UI ----------------
-st.title("🚁 Drone Flight Analyzer")
+
 
 
 # ---------------- UI ----------------
