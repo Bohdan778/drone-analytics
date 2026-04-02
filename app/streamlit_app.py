@@ -71,9 +71,12 @@ if uploaded_file:
             try:
                 prepared_df = prepare_trajectory_data(data)
                 fig = plot_trajectory(prepared_df)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             except Exception as plot_error:
                 st.warning(f"Не вдалося побудувати 3D траєкторію: {plot_error}")
+
+            # Scroll margin
+            st.markdown("<br><br><br>", unsafe_allow_html=True)
 
             # RAW DATA
             with st.expander("Показати сирі дані"):
