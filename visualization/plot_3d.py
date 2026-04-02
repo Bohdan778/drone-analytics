@@ -1,31 +1,22 @@
 import plotly.graph_objects as go
+import numpy as np
 
-def plot_trajectory(df):
-    
+def plot_trajectory(df, color_column="time_sec"):
     df = df.copy()
 
-    
     required_cols = ['x_enu', 'y_enu', 'z_enu']
     if not all(col in df.columns for col in required_cols):
-         raise ValueError(f"DataFrame повинен містити колонки: {required_cols}")
+        raise ValueError(f"Missing required columns: {required_cols}")
+
+    if df.empty:
+        raise ValueError("Empty DataFrame")
+
+    if color_column in df.columns:
+        color = df[color_column].fillna(0)
+    else:
+        color = np.linspace(0, 1, len(df))
 
     fig = go.Figure()
-
-    
-    
-    if 'time_sec' in df.columns:
-        line_color = df['time_sec']
-        colorbar_title = "Час (с)"
-        show_colorbar = True
-    elif 'speed_3d' in df.columns:
-        line_color = df['speed_3d']
-        colorbar_title = "Швидкість (м/с)"
-        show_colorbar = True
-    else:
-        line_color = 'blue'
-        colorbar_title = None
-        show_colorbar = False
-    
 
     fig.add_trace(go.Scatter3d(
         x=df['x_enu'],
@@ -33,25 +24,79 @@ def plot_trajectory(df):
         z=df['z_enu'],
         mode='lines',
         line=dict(
-            width=5,
-            color=line_color,
-            colorscale='Turbo', 
-            colorbar=dict(title=colorbar_title) if show_colorbar else None,
-            showscale=show_colorbar
+            width=6,
+            color=color,
+            colorscale='Turbo',
+            colorbar=dict(
+                title=color_column.upper(),
+                thickness=15
+            ),
+            showscale=True
         ),
-        name='Траєкторія дрона'
+        hovertemplate=(
+            "<b>Position</b><br>"
+            "X: %{x:.1f} m<br>"
+            "Y: %{y:.1f} m<br>"
+            "Z: %{z:.1f} m<br>"
+            "<extra></extra>"
+        ),
+        name="Trajectory"
     ))
 
-    
+    fig.add_trace(go.Scatter3d(
+        x=[df['x_enu'].iloc[0]],
+        y=[df['y_enu'].iloc[0]],
+        z=[df['z_enu'].iloc[0]],
+        mode='markers+text',
+        marker=dict(size=8, color='green'),
+        text=["START"],
+        textposition="top center",
+        name="Start"
+    ))
+
+    fig.add_trace(go.Scatter3d(
+        x=[df['x_enu'].iloc[-1]],
+        y=[df['y_enu'].iloc[-1]],
+        z=[df['z_enu'].iloc[-1]],
+        mode='markers+text',
+        marker=dict(size=8, color='red'),
+        text=["END"],
+        textposition="top center",
+        name="End"
+    ))
+
     fig.update_layout(
-        title="3D Траєкторія польоту дрона",
+        title={
+            "text": "🚁 Drone Flight Trajectory",
+            "x": 0.5
+        },
         scene=dict(
-            xaxis_title='X (Схід), метри',
-            yaxis_title='Y (Північ), метри',
-            zaxis_title='Z (Висота), метри',
-            aspectmode='manual', 
-            aspectratio=dict(x=1, y=1, z=0.8)
+            xaxis=dict(
+                title='East (m)',
+                showbackground=True,
+                backgroundcolor="rgb(20,20,20)",
+                gridcolor="gray"
+            ),
+            yaxis=dict(
+                title='North (m)',
+                showbackground=True,
+                backgroundcolor="rgb(20,20,20)",
+                gridcolor="gray"
+            ),
+            zaxis=dict(
+                title='Altitude (m)',
+                showbackground=True,
+                backgroundcolor="rgb(20,20,20)",
+                gridcolor="gray"
+            ),
+            aspectmode='data',
+
+            camera=dict(
+                eye=dict(x=1.5, y=1.5, z=1.2)
+            )
         ),
+        template="plotly_dark",
         margin=dict(l=0, r=0, b=0, t=40)
     )
+
     return fig

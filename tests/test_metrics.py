@@ -1,34 +1,38 @@
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from analytics.metrics import calculate_flight_metrics
-from analytics.metrics import prepare_trajectory_data
-from parser.parser import parse_ardupilot_log
+import pytest
+import pandas as pd
+import numpy as np
+from analytics.metrics import calculate_flight_metrics, prepare_trajectory_data
 
 
-if __name__ == "__main__":
-    print("Читаємо лог-файл...")
+@pytest.fixture
+def mock_telemetry_data():
+    """Creates a fake DataFrame for metrics testing."""
+    times = np.linspace(0, 10e6, 11)  # 10 seconds (in microseconds)
+    return pd.DataFrame({
+        'time': times,
+        'lat': np.linspace(50.0, 50.01, 11),
+        'lon': np.linspace(30.0, 30.01, 11),
+        'alt': np.linspace(100, 120, 11),
+        'acc_x': np.zeros(11),
+        'acc_y': np.zeros(11),
+        'acc_z': np.full(11, -9.81)
+    })
+
+
+def test_calculate_flight_metrics(mock_telemetry_data):
+    metrics = calculate_flight_metrics(mock_telemetry_data)
     
-    df = parse_ardupilot_log("data/00000019.BIN")
+    assert "duration_sec" in metrics
+    assert metrics["duration_sec"] == 10.0
+    assert metrics["max_climb_m"] == 20.0
+    assert metrics["max_accel_m_s2"] >= 0.0
+    assert metrics["total_distance_m"] > 0.0
 
-    print("Рахуємо метрики...")
+
+def test_prepare_trajectory_data(mock_telemetry_data):
+    trajectory_df = prepare_trajectory_data(mock_telemetry_data)
     
-    result = calculate_flight_metrics(df)
-
-    print("\n--- Результати польоту ---")
-    for key, value in result.items():
-        print(f"{key}: {round(value, 2)}")
-
-    print("\nГотуємо дані для 3D траєкторії...")
-    
-    trajectory_df = prepare_trajectory_data(df)
-
-    print("\n--- Дані для 3D графіка (перші 5 точок) ---")
-    print(trajectory_df.tail())
-
-    print("\n--- Максимальне віддалення від старту ---")
-    print(f"Далі на Схід (X): {trajectory_df['x_enu'].max():.2f} м")
-    print(f"Далі на Північ (Y): {trajectory_df['y_enu'].max():.2f} м")
-    print(f"Макс. Висота (Z): {trajectory_df['z_enu'].max():.2f} м")
+    assert "x_enu" in trajectory_df.columns
+    assert "y_enu" in trajectory_df.columns
+    assert "z_enu" in trajectory_df.columns
+    assert trajectory_df["z_enu"].iloc[-1] == 20.0

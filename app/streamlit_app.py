@@ -1,92 +1,117 @@
 import sys
 import os
-import tempfile
 
-# Path fix
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, ".."))
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 import streamlit as st
+import tempfile
 
-# Setup page once
-st.set_page_config(page_title="Drone Analyzer", layout="wide")
+try:
+    # import google.generativeai as genai
+    HAS_GENAI = True
+except ImportError:
+    HAS_GENAI = False
 
-# Imports
 from parser.parser import parse_ardupilot_log
 from analytics.metrics import calculate_flight_metrics, prepare_trajectory_data
 from visualization.plot_3d import plot_trajectory
 
-# UI
-st.title("Drone Flight Analyzer")
-st.write("Завантаж лог файл польоту дрона (.bin або .log)")
+st.set_page_config(page_title="Drone Analyzer", layout="wide")
 
-uploaded_file = st.file_uploader("Обери файл", type=["bin", "log"])
+st.title("🚁 Drone Flight Analyzer")
+st.caption("Upload ArduPilot log file (.bin / .log)")
 
-# LOGIC
-if uploaded_file:
+uploaded_file = st.file_uploader("Upload flight log", type=["bin", "log"])
+
+@st.cache_data
+def process_file(file_bytes):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".BIN") as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+
     try:
-        # Create temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".BIN") as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            tmp_path = tmp_file.name
-
+        df = parse_ardupilot_log(tmp_path)
+        metrics = calculate_flight_metrics(df)
+        trajectory = prepare_trajectory_data(df)
+    finally:
         try:
-            # 1. Parse
-            data = parse_ardupilot_log(tmp_path)
+            os.remove(tmp_path)
+        except:
+            pass
 
-            # 2. Metrics
-            metrics = calculate_flight_metrics(data)
+    return df, metrics, trajectory
 
-            st.success("Файл успішно оброблено")
 
-            # METRICS
-            st.subheader("Основні показники")
+if uploaded_file:
 
-            col1, col2, col3 = st.columns(3)
+    if uploaded_file.size == 0:
+        st.error("Empty file")
+        st.stop()
 
-            with col1:
-                st.metric(
-                    "Макс швидкість",
-                    f"{metrics.get('max_horizontal_speed_m_s', 0):.2f} m/s"
-                )
+    try:
+        df, metrics, trajectory = process_file(uploaded_file.getvalue())
 
-            with col2:
-                st.metric(
-                    "Дистанція",
-                    f"{metrics.get('total_distance_m', 0):.2f} m"
-                )
+        st.success("File processed successfully")
 
-            with col3:
-                st.metric(
-                    "Макс висота",
-                    f"{metrics.get('max_climb_m', 0):.2f} m"
-                )
+        st.subheader("📊 Key Metrics")
 
-            # 3D PLOT
-            st.subheader("3D Траєкторія польоту")
-            
-            # Safe plot execution
-            try:
-                prepared_df = prepare_trajectory_data(data)
-                fig = plot_trajectory(prepared_df)
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as plot_error:
-                st.warning(f"Не вдалося побудувати 3D траєкторію: {plot_error}")
+        col1, col2, col3 = st.columns(3)
 
-            # RAW DATA
-            with st.expander("Показати сирі дані"):
-                st.write(data)
-                
-        finally:
-            # Cleanup
-            try:
-                os.remove(tmp_path)
-            except PermissionError:
-                pass
+        col1.metric("Max Speed", f"{metrics['max_horizontal_speed_m_s']:.2f} m/s")
+        col2.metric("Distance", f"{metrics['total_distance_m']:.2f} m")
+        col3.metric("Max Altitude", f"{metrics['max_climb_m']:.2f} m")
+
+        # --- TRAJECTORY ---
+        st.subheader("🛰️ 3D Flight Trajectory")
+
+        color_mode = st.selectbox(
+            "Color trajectory by:",
+            ["Time", "Speed"]
+        )
+
+        color_column = "time_sec" if color_mode == "Time" else "speed_3d"
+
+        fig = plot_trajectory(trajectory, color_column)
+        st.plotly_chart(fig, width="stretch")
+
+        # --- RAW DATA ---
+        with st.expander("🔍 Show raw data"):
+            st.dataframe(df)
+
+        st.subheader("🤖 AI Flight Analysis")
+        if HAS_GENAI:
+            api_key = st.text_input("Enter your Google Gemini API Key for AI analysis", type="password")
+            if api_key:
+                if st.button("Generate AI Report"):
+                    with st.spinner("Analyzing data..."):
+                        try:
+                            #genai.configure(api_key=api_key)
+                            #model = genai.GenerativeModel('gemini-1.5-flash')
+                            
+                            prompt = f"""
+                            You are an aviation expert. Analyze the flight metrics of the drone and provide a brief text summary regarding the success of the mission 
+                            or potential problems (e.g., overspeeding, excessive acceleration, which could indicate a crash or an aggressive maneuver).
+                            
+                            Mission metrics:
+                            - Flight duration: {metrics['duration_sec']:.2f} sec
+                            - Maximum altitude (climb): {metrics['max_climb_m']:.2f} m
+                            - Max horizontal speed: {metrics['max_horizontal_speed_m_s']:.2f} m/s
+                            - Max vertical speed: {metrics['max_vertical_speed_m_s']:.2f} m/s
+                            - Max acceleration: {metrics['max_accel_m_s2']:.2f} m/s^2
+                            - Total distance covered: {metrics['total_distance_m']:.2f} m
+                            """
+                            
+                            #response = model.generate_content(prompt)
+                            #st.write(response.text)
+                        except Exception as e:
+                            st.error(f"Error generating AI report: {e}")
+            else:
+                st.info("A free Google Gemini API key is required to use the AI assistant. Get it on the Google AI Studio website.")
+        else:
+            st.warning("The `google-generativeai` library is not installed. AI analysis is unavailable.")
 
     except Exception as e:
-        st.error(f"Помилка обробки файлу: {e}")
-
-
+        st.error("Error processing file")
+        st.exception(e)
