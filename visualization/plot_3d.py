@@ -67,7 +67,7 @@ def plot_trajectory(df, color_column="time_sec"):
 
     fig.update_layout(
         title={
-            "text": "🚁 Drone Flight Trajectory",
+            "text": "Drone Flight Trajectory",
             "x": 0.5
         },
         scene=dict(
