@@ -21,6 +21,7 @@ except ImportError:
 from parser.parser import parse_ardupilot_log
 from analytics.metrics import calculate_flight_metrics, prepare_trajectory_data
 from visualization.plot_3d import plot_trajectory
+import plotly.express as px
 
 st.set_page_config(page_title="Drone Analyzer", layout="wide")
 
@@ -32,7 +33,7 @@ st.caption("Upload ArduPilot log file (.bin / .log)")
 
 uploaded_file = st.file_uploader("Upload flight log", type=["bin", "log"])
 
-@st.cache_data
+# @st.cache_data  # Тимчасово вимкнено, щоб завжди виконувався новий код!
 def process_file(file_bytes):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".BIN") as tmp:
         tmp.write(file_bytes)
@@ -81,6 +82,26 @@ if uploaded_file:
 
         fig = plot_trajectory(trajectory, color_column)
         st.plotly_chart(fig, width="stretch")
+
+        # --- TELEMETRY CHARTS ---
+        st.subheader("📈 Telemetry Trends")
+        tab_speed, tab_alt = st.tabs(["Speed over Time", "Altitude over Time"])
+        
+        with tab_speed:
+            fig_speed = px.line(trajectory, x="time_sec", y="speed_3d", 
+                                title="3D Speed vs Time", 
+                                labels={"time_sec": "Time (s)", "speed_3d": "Speed (m/s)"},
+                                template="plotly_dark")
+            fig_speed.update_traces(line=dict(color="cyan", width=2))
+            st.plotly_chart(fig_speed, use_container_width=True)
+            
+        with tab_alt:
+            fig_alt = px.line(trajectory, x="time_sec", y="z_enu", 
+                              title="Relative Altitude vs Time", 
+                              labels={"time_sec": "Time (s)", "z_enu": "Altitude (m)"},
+                              template="plotly_dark")
+            fig_alt.update_traces(line=dict(color="magenta", width=2))
+            st.plotly_chart(fig_alt, use_container_width=True)
 
         # --- RAW DATA ---
         with st.expander("Show raw data"):

@@ -27,6 +27,8 @@ def parse_ardupilot_log(file_path: str) -> pd.DataFrame:
         "acc_x": None,
         "acc_y": None,
         "acc_z": None,
+        "spd": 0.0,
+        "vz": 0.0,
     }
 
     while True:
@@ -59,10 +61,26 @@ def parse_ardupilot_log(file_path: str) -> pd.DataFrame:
             if alt and abs(alt) > 10000:
                 alt = alt / 1000  # mm → meters
 
+            # --- NATIVE SPEED EXTRACTION ---
+            spd = getattr(msg, "Spd", None)
+            if spd is None:
+                vx = getattr(msg, "vx", None)
+                vy = getattr(msg, "vy", None)
+                if vx is not None and vy is not None:
+                    spd = (np.sqrt(vx**2 + vy**2)) / 100.0
+
+            vz = getattr(msg, "VZ", None)
+            if vz is None:
+                vz_cm = getattr(msg, "vz", None)
+                if vz_cm is not None:
+                    vz = vz_cm / 100.0
+
             current.update({
                 "lat": lat,
                 "lon": lon,
-                "alt": alt
+                "alt": alt,
+                "spd": spd if spd is not None else current["spd"],
+                "vz": vz if vz is not None else current["vz"]
             })
 
         # --- IMU ---
@@ -99,7 +117,8 @@ def parse_ardupilot_log(file_path: str) -> pd.DataFrame:
     df.attrs['units'] = {
         'lat': 'degrees', 'lon': 'degrees', 'alt': 'meters',
         'acc_x': 'm/s^2 or G', 'acc_y': 'm/s^2 or G', 'acc_z': 'm/s^2 or G',
-        'time': 'microseconds'
+        'time': 'microseconds',
+        'spd': 'm/s', 'vz': 'm/s'
     }
     
     print(f"Sampling Rates -> GPS: {df.attrs['gps_freq_hz']:.2f} Hz, IMU: {df.attrs['imu_freq_hz']:.2f} Hz")

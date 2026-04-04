@@ -47,27 +47,25 @@ def calculate_flight_metrics(df: pd.DataFrame) -> dict:
     max_climb = max_altitude - min_altitude
 
     # =========================================================
-    # IMU -> VELOCITY
+    # NATIVE FLIGHT VELOCITY (EKF Data)
     # =========================================================
-    df[['v_x', 'v_y', 'v_z']] = 0.0
+    # Замість ручних розрахунків ми беремо готову швидкість, 
+    # яку записує бортовий комп'ютер дрона (EKF) — це 100% точність.
 
-    acc_x_corrected = df['acc_x'] - df['acc_x'].mean()
-    acc_y_corrected = df['acc_y'] - df['acc_y'].mean()
-    g_est = df['acc_z'].iloc[:200].mean() if len(df) > 200 else df['acc_z'].mean()
-    acc_z_corrected = df['acc_z'] - g_est
+    if 'spd' in df.columns:
+        # Фільтр від глітчів: беремо медіану за 5 точок і відсікаємо все, що > 100 м/с
+        spd_clean = df['spd'].rolling(window=5, min_periods=1).median()
+        spd_valid = spd_clean[spd_clean < 100]
+        max_horizontal_speed = float(spd_valid.max()) if not spd_valid.empty else 0.0
+    else:
+        max_horizontal_speed = 0.0
 
-    df['v_x'] = ((0.5 * (acc_x_corrected + acc_x_corrected.shift(1).fillna(acc_x_corrected))) * dt).cumsum()
-    df['v_y'] = ((0.5 * (acc_y_corrected + acc_y_corrected.shift(1).fillna(acc_y_corrected))) * dt).cumsum()
-    df['v_z'] = ((0.5 * (acc_z_corrected + acc_z_corrected.shift(1).fillna(acc_z_corrected))) * dt).cumsum()
-
-    df['speed_horizontal'] = np.sqrt(df['v_x']**2 + df['v_y']**2)
-    df['speed_3d'] = np.sqrt(df['v_x']**2 + df['v_y']**2 + df['v_z']**2)
-
-    max_horizontal_speed = df['speed_horizontal'].max()
-    max_vertical_speed = df['v_z'].abs().max()
-
-    stationary_mask = acc_mag < 1.5
-    df.loc[stationary_mask, ['v_x', 'v_y', 'v_z']] *= 0.98
+    if 'vz' in df.columns:
+        vz_clean = df['vz'].rolling(window=5, min_periods=1).median()
+        vz_valid = vz_clean[vz_clean.abs() < 50]
+        max_vertical_speed = float(vz_valid.abs().max()) if not vz_valid.empty else 0.0
+    else:
+        max_vertical_speed = 0.0
 
     return {
         "duration_sec": float(total_duration),
@@ -123,9 +121,15 @@ def prepare_trajectory_data(df: pd.DataFrame) -> pd.DataFrame:
     df['y_enu'] = R * (lat - lat0)
     df['z_enu'] = df['alt'] - alt0
 
-    if {'v_x', 'v_y', 'v_z'}.issubset(df.columns):
-        df['speed_3d'] = np.sqrt(df['v_x']**2 + df['v_y']**2 + df['v_z']**2)
-    else:
-        df['speed_3d'] = 0.0
+    # --- Рахуємо локальну 3D швидкість для візуалізації ---
+    dt_traj = df['time_sec'].diff().fillna(0)
+    dist_3d = np.sqrt(df['x_enu'].diff().fillna(0)**2 + 
+                      df['y_enu'].diff().fillna(0)**2 + 
+                      df['z_enu'].diff().fillna(0)**2)
+    
+    raw_speed = (dist_3d / dt_traj).replace([np.inf, -np.inf], 0).fillna(0)
+    
+    # Згладжуємо швидкість для красивого градієнта на графіку Plotly
+    df['speed_3d'] = raw_speed.rolling(window=10, min_periods=1).mean().clip(upper=50)
 
     return df[['time_sec', 'x_enu', 'y_enu', 'z_enu', 'speed_3d']]
