@@ -89,10 +89,9 @@ def plot_trajectory(df, color_column="time_sec"):
                 backgroundcolor="rgb(20,20,20)",
                 gridcolor="gray"
             ),
-            aspectmode='data',
-
+            aspectmode='cube', 
             camera=dict(
-                eye=dict(x=1.5, y=1.5, z=1.2)
+                eye=dict(x=1.8, y=1.8, z=1.2)
             )
         ),
         template="plotly_dark",

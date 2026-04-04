@@ -47,6 +47,8 @@ def parse_ardupilot_log(file_path: str) -> pd.DataFrame:
             gps_times.append(time)
             lat = getattr(msg, "Lat", None) or getattr(msg, "lat", None)
             lon = getattr(msg, "Lng", None) or getattr(msg, "lon", None)
+            if lat == 0.0 or lon == 0.0:
+                continue 
             alt = getattr(msg, "Alt", None) or getattr(msg, "alt", None)
 
             # Normalize GPS (if scaled)

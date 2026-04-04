@@ -1,112 +1,92 @@
 import pandas as pd
 import numpy as np
-
 from analytics.haversine import calculate_haversine_distance
 
 def calculate_flight_metrics(df: pd.DataFrame) -> dict:
-    """
-    Compute key flight metrics using GPS + IMU fusion.
-
-    Key principles:
-    - Distance → Haversine (GPS)
-    - Velocity → obtained from IMU via trapezoidal integration (REQUIRED)
-    - ENU motion assumption for short-range accuracy
-    """
-
     df = df.copy()
 
-    # --- CLEAN DATA ---
+    # 1. CLEAN DATA (Видаляємо "Нульовий острів" і порожні рядки)
     df = df.dropna(subset=['lat', 'lon', 'alt', 'acc_x', 'acc_y', 'acc_z'])
+    df = df[(df['lat'].abs() > 1.0) & (df['lon'].abs() > 1.0)]
     df = df.reset_index(drop=True)
 
-    # --- TIME ---
+    if df.empty:
+        raise ValueError("Немає валідних GPS-даних у лозі")
+
+    # TIME
     df['time_sec'] = (df['time'] - df['time'].iloc[0]) / 1e6
     dt = df['time_sec'].diff().fillna(0)
-
     total_duration = df['time_sec'].iloc[-1]
 
-    # --- DISTANCE (GPS HAVERSINE) ---
-    df['distance_step'] = calculate_haversine_distance(df['lat'], df['lon'])
-    total_distance = df['distance_step'].sum()
+    # 2. DISTANCE (ІЗ ЗАХИСТОМ ВІД ШУМУ ТА СТРИБКІВ)
+    raw_distance_step = calculate_haversine_distance(df['lat'], df['lon'])
+    
+    # Фільтр 1: Захист від телепортації (якщо дрон "стрибнув" більше ніж на 50м за мілісекунду)
+    safe_distance_step = np.where(raw_distance_step > 50, 0.0, raw_distance_step)
+    
+    # Фільтр 2: Захист від GPS-шуму (ігноруємо мікро-рухи менше 0.5 метра)
+    safe_distance_step = np.where(safe_distance_step < 0.5, 0.0, safe_distance_step)
+    
+    total_distance = safe_distance_step.sum()
 
-    # --- ACCELERATION MAGNITUDE ---
+    # ACCELERATION MAGNITUDE
     acc_mag = np.sqrt(df['acc_x']**2 + df['acc_y']**2 + df['acc_z']**2)
     max_acceleration = acc_mag.max()
 
-    # --- ALTITUDE ---
+    # ALTITUDE
     max_altitude = df['alt'].max()
     min_altitude = df['alt'].min()
     max_climb = max_altitude - min_altitude
 
     # =========================================================
-    #  IMU → VELOCITY (TRAPEZOIDAL INTEGRATION)
+    # IMU -> VELOCITY (TRAPEZOIDAL INTEGRATION FIX)
     # =========================================================
-
     df[['v_x', 'v_y', 'v_z']] = 0.0
 
-    # --- GRAVITY COMPENSATION ---
-    # Estimate gravity from first stable samples
+    # GRAVITY & TILT COMPENSATION
+    acc_x_corrected = df['acc_x'] - df['acc_x'].mean()
+    acc_y_corrected = df['acc_y'] - df['acc_y'].mean()
     g_est = df['acc_z'].iloc[:200].mean()
     acc_z_corrected = df['acc_z'] - g_est
 
-    # --- TRAPEZOIDAL INTEGRATION ---
-    for axis in ['x', 'y']:
-        a = df[f'acc_{axis}']
-        df[f'v_{axis}'] = (
-            (0.5 * (a + a.shift(1).fillna(a))) * dt
-        ).cumsum()
+    # TRAPEZOIDAL INTEGRATION
+    df['v_x'] = ((0.5 * (acc_x_corrected + acc_x_corrected.shift(1).fillna(acc_x_corrected))) * dt).cumsum()
+    df['v_y'] = ((0.5 * (acc_y_corrected + acc_y_corrected.shift(1).fillna(acc_y_corrected))) * dt).cumsum()
+    df['v_z'] = ((0.5 * (acc_z_corrected + acc_z_corrected.shift(1).fillna(acc_z_corrected))) * dt).cumsum()
 
-    df['v_z'] = (
-        (0.5 * (acc_z_corrected + acc_z_corrected.shift(1).fillna(acc_z_corrected)))
-        * dt
-    ).cumsum()
-
-    # --- SPEEDS FROM IMU (REQUIRED BY TASK) ---
+    # SPEEDS FROM IMU
     df['speed_horizontal'] = np.sqrt(df['v_x']**2 + df['v_y']**2)
     df['speed_3d'] = np.sqrt(df['v_x']**2 + df['v_y']**2 + df['v_z']**2)
 
     max_horizontal_speed = df['speed_horizontal'].max()
     max_vertical_speed = df['v_z'].abs().max()
 
-    # =========================================================
-    #  SIMPLE DRIFT MITIGATION (OPTIONAL BUT PRO)
-    # =========================================================
-    # If drone is stationary (low accel), slowly damp velocity
-    stationary_mask = acc_mag < 1.5  # near gravity only
+    # SIMPLE DRIFT MITIGATION
+    stationary_mask = acc_mag < 1.5
     df.loc[stationary_mask, ['v_x', 'v_y', 'v_z']] *= 0.98
 
     return {
         "duration_sec": float(total_duration),
         "total_distance_m": float(total_distance),
-
         "max_altitude_m": float(max_altitude),
         "max_climb_m": float(max_climb),
-
         "max_accel_m_s2": float(max_acceleration),
-
-        #  IMPORTANT (IMU-based)
         "max_horizontal_speed_m_s": float(max_horizontal_speed),
         "max_vertical_speed_m_s": float(max_vertical_speed),
     }
 
 # =========================================================
-#  TRAJECTORY PREPARATION (UNCHANGED BUT CLEANED)
+# TRAJECTORY PREPARATION
 # =========================================================
 
 def prepare_trajectory_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert WGS84 → ENU (local Cartesian system).
-
-    Accurate for short-range flights.
-    """
-
     df = df.copy()
 
-    df['time_sec'] = (df['time'] - df['time'].iloc[0]) / 1e6
+    # Також чистимо координати для 3D графіка від глітчів!
+    df = df.dropna(subset=['lat', 'lon', 'alt'])
+    df = df[(df['lat'].abs() > 1.0) & (df['lon'].abs() > 1.0)]
 
-    required = ['lat', 'lon', 'alt']
-    if not all(col in df.columns for col in required):
-        raise ValueError(f"Missing required columns: {required}")
+    df['time_sec'] = (df['time'] - df['time'].iloc[0]) / 1e6
 
     R = 6371000.0
 
@@ -121,7 +101,6 @@ def prepare_trajectory_data(df: pd.DataFrame) -> pd.DataFrame:
     df['y_enu'] = R * (lat - lat0)
     df['z_enu'] = df['alt'] - alt0
 
-    # --- Use IMU-based speed if available ---
     if {'v_x', 'v_y', 'v_z'}.issubset(df.columns):
         df['speed_3d'] = np.sqrt(df['v_x']**2 + df['v_y']**2 + df['v_z']**2)
     else:
