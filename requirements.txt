@@ -3,7 +3,6 @@ numpy
 pymavlink
 plotly
 streamlit
-google-generativeai
 pytest
 google-genai
 python-dotenv
