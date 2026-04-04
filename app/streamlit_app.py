@@ -110,14 +110,19 @@ if uploaded_file:
         st.subheader("Hybrid AI Diagnostics")
         st.caption("Rule-based heuristics combined with optional LLM deep analysis.")
         
+        drone_type = st.radio("Select Drone Profile:", ["Standard (Cinematic/Survey)", "FPV / Racing / Fixed-Wing"], horizontal=True)
         use_llm = st.checkbox("Enable Deep LLM Analysis (Requires Gemini API Key)", value=False)
         
         if st.button("Generate Diagnostic Report"):
             with st.spinner("Analyzing telemetry..."):
                 report = ["### Flight Diagnostic Summary\n"]
                 
+                # --- Динамічні пороги чутливості AI ---
+                crash_accel_limit = 60 if "FPV" in drone_type else 30
+                speed_limit = 40 if "FPV" in drone_type else 20
+
                 # 1. Smart Crash Detection (Acceleration Spike + High Vertical Speed)
-                is_crash = metrics['max_accel_m_s2'] > 30 and metrics['max_vertical_speed_m_s'] > 5
+                is_crash = metrics['max_accel_m_s2'] > crash_accel_limit and metrics['max_vertical_speed_m_s'] > 5
                 
                 if is_crash:
                     report.append("- **Status:** **CRASH OR SEVERE IMPACT DETECTED.** Extreme acceleration spikes found.")
@@ -130,7 +135,7 @@ if uploaded_file:
                 report.append("\n### Deep Dive Analysis\n")
                 
                 # 2. Speed Analysis
-                if metrics['max_horizontal_speed_m_s'] > 20:
+                if metrics['max_horizontal_speed_m_s'] > speed_limit:
                     report.append("- **Speed:** High-speed flight profile. Ensure motors and props are rated for this stress.")
                 elif metrics['max_horizontal_speed_m_s'] < 2:
                     report.append("- **Speed:** Hovering or very slow inspection flight.")
