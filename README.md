@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🚁 Drone Analytics System
 
 ## 📌 Про проєкт
@@ -159,4 +158,3 @@ Approximates the Earth as flat over the short local flight distance to convert L
 
 ---
 *Developed for the Drone Analytics challenge.*
->>>>>>> dev
