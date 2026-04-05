@@ -1,10 +1,30 @@
 import numpy as np
+import pandas as pd
 
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371000  # meters
-    phi1, phi2 = np.radians(lat1), np.radians(lat2)
-    dphi = np.radians(lat2 - lat1)
-    dlambda = np.radians(lon2 - lon1)
+def calculate_haversine_distance(lat: pd.Series, lon: pd.Series) -> pd.Series:
+    # Convert to radians
+    lat_rad = np.radians(lat)
+    lon_rad = np.radians(lon)
 
-    a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
-    return 2 * R * np.arcsin(np.sqrt(a))
+    # Shift for previous point
+    lat_prev = lat_rad.shift(1)
+    lon_prev = lon_rad.shift(1)
+
+    # Differences
+    dlat = lat_rad - lat_prev
+    dlon = lon_rad - lon_prev
+
+    # Haversine formula
+    a = (
+        np.sin(dlat / 2.0) ** 2
+        + np.cos(lat_prev) * np.cos(lat_rad) * np.sin(dlon / 2.0) ** 2
+    )
+
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+    R = 6371000  # Earth radius in meters
+
+    distance = R * c
+
+    # Replace NaN (first row) with 0
+    return distance.fillna(0)

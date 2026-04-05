@@ -1,24 +1,8 @@
-# Core data processing
-pandas==2.2.2
-numpy==1.26.4
-
-# Math / scientific
-scipy==1.13.1
-
-# Ardupilot log parsing
-pymavlink==2.4.41
-
-# Visualization
-plotly==5.22.0
-
-# Web app
-streamlit==1.35.0
-
-# Optional (but useful)
-matplotlib==3.9.0
-
-# AI (optional feature)
-openai==1.30.1
-
-# Utils
-python-dotenv==1.0.1
+pandas
+numpy
+pymavlink
+plotly
+streamlit
+pytest
+google-genai
+python-dotenv
